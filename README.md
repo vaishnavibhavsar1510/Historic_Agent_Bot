@@ -197,7 +197,7 @@ Contributions are welcome! If you'd like to contribute, please fork the reposito
 
 ## 👥 Authors
 
--   [Vaishnavi Bhavsar/https://github.com/vaishnavibhavsar1510] (Link to your GitHub profile)
+-   [ Vaishnavi Bhavsar ] Link to your GitHub profile:https://github.com/vaishnavibhavsar1510
 
 ## 📞 Support or Contact
 
