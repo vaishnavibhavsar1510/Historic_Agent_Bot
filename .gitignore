@@ -1,0 +1,16 @@
+# Ignore Node.js modules and build artifacts
+node_modules/
+.next/
+
+# Ignore Python virtual environment
+.venv/
+
+# Ignore environment variable files
+.env
+
+# Ignore any local IDE or OS specific files
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store 
