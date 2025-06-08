@@ -28,7 +28,7 @@ SESSION_STATES: dict[str, ChatState] = {}
 async def chat_endpoint(request: ChatRequest):
     """
     Single endpoint that handles:
-      • A “normal” monument question
+      • A "normal" monument question
       • An email address (to trigger OTP)
       • A 6-digit OTP code (to verify & send final email)
     The ChatState for each session_id is persisted in SESSION_STATES.
@@ -47,7 +47,7 @@ async def chat_endpoint(request: ChatRequest):
             messages=[HumanMessage(content="Hey, I am a historical agent AI. You can ask anything about historical monuments!")]
         )
 
-    # 2) Append the user’s latest message to state.messages,
+    # 2) Append the user's latest message to state.messages,
     #    and store it in state.user_input so our LangGraph graph can see it.
     state.user_input = user_input
     state.messages.append(HumanMessage(content=user_input))
@@ -66,7 +66,7 @@ async def chat_endpoint(request: ChatRequest):
         # 5) Persist the updated ChatState for this session_id
         SESSION_STATES[session_id] = new_state
 
-        # 6) Extract “the latest bot reply” from new_state.  We look for:
+        # 6) Extract "the latest bot reply" from new_state.  We look for:
         #      • The last AIMessage in new_state.messages (most common)
         #      • Otherwise, fallback to new_state.response if it exists
         bot_reply = None
@@ -76,7 +76,7 @@ async def chat_endpoint(request: ChatRequest):
             if isinstance(last_msg, AIMessage):
                 bot_reply = last_msg.content
 
-        # If we didn’t find an AIMessage, check if there’s a 'response' field:
+        # If we didn't find an AIMessage, check if there's a 'response' field:
         if (bot_reply is None) and hasattr(new_state, "response"):
             # Pydantic BaseModel: new_state.dict().get("response")
             resp = new_state.model_dump().get("response")
@@ -86,7 +86,7 @@ async def chat_endpoint(request: ChatRequest):
         # If still no reply, return a generic fallback
         if bot_reply is None:
             logger.warning("LangGraph finished without an AIMessage or 'response' field.")
-            bot_reply = "Sorry, I couldn’t generate a response."
+            bot_reply = "Sorry, I couldn't generate a response."
 
         return ChatResponse(message=bot_reply)
 

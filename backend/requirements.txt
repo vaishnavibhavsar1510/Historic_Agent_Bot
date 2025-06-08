@@ -14,3 +14,5 @@ langchain-community
 starlette-context==0.3.6
 starlette-sessions==0.3.0
 itsdangerous==2.2.0
+streamlit
+langchain-openai

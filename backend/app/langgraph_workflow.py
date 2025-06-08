@@ -54,6 +54,7 @@ class ChatState(BaseModel):
     monument_results: List[Dict] = Field(default_factory=list)
     response: Optional[str] = None
     next_step: str = "process_user_input"
+    last_monument_query: Optional[str] = None
 
 # --------------------------------------------------------------------------- #
 #  Node: process_user_input
@@ -86,7 +87,7 @@ def process_user_input(state: ChatState) -> ChatState:
             return state
 
         email = find_email(state.user_input)
-        if email and is_valid_email(email):
+        if email:
             state.email = email
             state.awaiting_email = False
             state.next_step = "send_otp"
@@ -121,6 +122,19 @@ def process_user_input(state: ChatState) -> ChatState:
         return state
 
     # ------------------------------------------------------- #
+    # Check for voluntary e-mail submission
+    # ------------------------------------------------------- #
+    if not state.awaiting_email and not state.awaiting_otp and state.user_input:
+        email = find_email(state.user_input)
+        logger.info("find_email returned: %s for user_input: %r", email, state.user_input)
+        if email:
+            state.email = email
+            state.next_step = "send_otp"
+            logger.info("Voluntary e-mail extracted → send_otp")
+            state.user_input = None # Consume the email input as it's been handled
+            return state
+
+    # ------------------------------------------------------- #
     # Fresh monument query (default route)
     # ------------------------------------------------------- #
     state.next_step = "check_query_type"
@@ -136,6 +150,7 @@ def check_query_type(state: ChatState) -> ChatState:
     results = monument_search.search(query, k=1)
     if results:
         state.monument_results = results
+        state.last_monument_query = query
         state.next_step = "generate_monument_response"
         logger.info("Monument found")
     else:
@@ -151,18 +166,17 @@ def generate_monument_response(state: ChatState) -> ChatState:
     )
     user_q = state.messages[-1].content
     prompt = (
-        "Using the information below, answer concisely.\n\n"
+        "Using the information below, answer concisely. Provide a detailed answer covering all key aspects.\n\n"
         f"User: {user_q}\n\nInformation:\n{context}\n\nBot:"
     )
     brief = llm.invoke(prompt).content.strip()
     reply = (
         brief
-        + "\n\nIf you’d like more details e-mailed to you, please share your "
-        "email address."
+        + " If you'd like more details e-mailed to you, please feel free to provide your email address in the chat."
     )
     state.messages.append(AIMessage(content=reply))
     state.response = reply
-    state.next_step = "ask_for_email"
+    state.next_step = END
     return state
 
 
@@ -179,16 +193,12 @@ def generate_non_monument_response(state: ChatState) -> ChatState:
     return state
 
 
-def ask_for_email(state: ChatState) -> ChatState:
-    state.awaiting_email = True
-    state.next_step = END
-    return state
-
-
 def send_otp_step(state: ChatState) -> ChatState:
     email = state.email
     otp = generate_otp()
     store_otp(email, otp, ttl_seconds=300)
+
+    logger.info("Generated OTP: %s for email: %s", otp, email)
 
     if send_otp_email(email, otp):
         msg = (
@@ -199,7 +209,7 @@ def send_otp_step(state: ChatState) -> ChatState:
         state.awaiting_otp = True
     else:
         msg = (
-            f"Sorry, I couldn’t send the OTP to {email}. "
+            f"Sorry, I couldn't send the OTP to {email}. "
             "Please check the address or provide a different one."
         )
         state.awaiting_email = True
@@ -211,9 +221,12 @@ def send_otp_step(state: ChatState) -> ChatState:
 
 
 def process_otp_input(state: ChatState) -> ChatState:
-    code = extract_otp(state.messages[-1].content, digits=6) or ""
+    # Use state.user_input to extract the OTP, as it comes directly from the form submission
+    code = extract_otp(state.user_input, digits=6) or ""
     email = state.email
     stored = retrieve_stored_otp(email)
+
+    logger.info("User entered OTP: %s, Stored OTP: %s for email: %s", code, stored, email)
 
     if stored and code == stored:
         delete_otp(email)
@@ -244,25 +257,58 @@ def final_confirmation(state: ChatState) -> ChatState:
     Compose a detailed guide and e-mail it *without* OTP footer.
     """
     email = state.email or ""
-    last_q = state.messages[-1].content
-    info = monument_search.search(last_q, k=1)
+    monument_query = state.last_monument_query
 
-    if info:
-        m = info[0]
-        subject = f"More about {m['name']}"
-        body = (
-            f"Here’s more detailed information on {m['name']} ({m['location']}):\n\n"
-            f"{m['description']}\n\nEnjoy your visit!"
+    email_subject = "Details from your Historical Monument Agent"
+    email_body = ""
+    monument_info_list = []
+
+    logger.info("Final confirmation initiated for email: %s, last_monument_query: %r", email, monument_query)
+    logger.info("Type of monument_query: %s", type(monument_query))
+
+    if monument_query:
+        # Attempt to search for the monument details
+        try:
+            monument_info_list = monument_search.search(monument_query, k=1)
+            logger.info("Found monument info for email: %s", monument_info_list)
+        except Exception as e:
+            logger.error("Error searching for monument details for email: %s", e)
+            monument_info_list = [] # Ensure it's an empty list on error
+            email_body = (
+                "Thank you for verifying your email. Unfortunately, I encountered an issue "
+                "retrieving details for your last monument query. "
+                "Please feel free to ask me about other historical monuments in the chat."
+            )
+    
+    if monument_info_list:
+        monument = monument_info_list[0]
+        email_subject = f"Details about {monument['name']}"
+        email_body = (
+            f"Dear user,\n\nHere are the details you requested about {monument['name']}:\n\n"
+            f"Name: {monument['name']}\n"
+            f"Location: {monument['location']}\n"
+            f"Description: {monument['description']}\n\n"
+            "If you have any more questions, feel free to ask!"
         )
     else:
-        subject = "Requested monument information"
-        body = "Thank you for verifying. Stay tuned for more historical details."
+        # If no specific monument query or search failed, and email_body wasn't set by an error
+        if not email_body:
+            email_body = (
+                "Thank you for verifying your email. I can provide details about historical monuments. "
+                "Please ask me about a specific monument in the chat, and I can email you more information."
+            )
 
-    send_plain_email(email, subject, body)
+    if send_plain_email(email, email_subject, email_body):
+        msg = "Thank you! Your email is verified. The details have been sent to your email."
+        state.response = msg
+        state.messages.append(AIMessage(content=msg))
+        state.next_step = END
+    else:
+        msg = "Email verification successful, but I failed to send the detailed email. Please try again later."
+        state.response = msg
+        state.messages.append(AIMessage(content=msg))
+        state.next_step = END # Or potentially a retry mechanism
 
-    # reset for fresh session
-    state.email = None
-    state.next_step = END
     return state
 
 
@@ -280,7 +326,6 @@ graph.add_node("process_user_input", process_user_input)
 graph.add_node("check_query_type", check_query_type)
 graph.add_node("generate_monument_response", generate_monument_response)
 graph.add_node("generate_non_monument_response", generate_non_monument_response)
-graph.add_node("ask_for_email", ask_for_email)
 graph.add_node("send_otp", send_otp_step)
 graph.add_node("process_otp_input", process_otp_input)
 graph.add_node("final_confirmation", final_confirmation)
@@ -309,10 +354,9 @@ graph.add_conditional_edges(
 graph.add_conditional_edges(
     "generate_monument_response",
     lambda s: s.next_step,
-    {"ask_for_email": "ask_for_email", END: END},
+    {"send_otp": "send_otp", END: END},
 )
 graph.add_edge("generate_non_monument_response", END)
-graph.add_edge("ask_for_email", END)
 graph.add_edge("send_otp", END)
 graph.add_conditional_edges(
     "process_otp_input",

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 import logging
-from typing import Optional, Union
+from typing import Optional, Union, List, Dict
 
 import redis
 from fastapi import FastAPI, HTTPException
@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from backend.app.chat import router as chat_router          # (keep if you still expose /chat/* sub-routes)
 from backend.app.config import settings
 from backend.app.langgraph_workflow import compiled_chat_graph, ChatState
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 # ────────────────────────── Logging ──────────────────────────
 logging.basicConfig(level=logging.INFO)
@@ -24,7 +24,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],   # adjust to your frontend(s)
+    allow_origins=["*"],  # In production, replace with specific origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -34,7 +34,7 @@ app.add_middleware(
 redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
 
 # ────────────────────────── Include other routers (optional) ──────────────────────────
-app.include_router(chat_router)
+# app.include_router(chat_router) # Commenting out to avoid routing conflict
 
 # ────────────────────────── Pydantic models ──────────────────────────
 class QueryRequest(BaseModel):
@@ -45,6 +45,13 @@ class QueryRequest(BaseModel):
     user_query: str
     session_id: Optional[str] = None
 
+class ChatRequest(BaseModel):
+    messages: List[Dict]
+    awaiting_email: bool = False
+    awaiting_otp: bool = False
+    email: Optional[str] = None
+    user_input: Optional[str] = None
+    last_monument_query: Optional[str] = None
 
 # ────────────────────────── Helper (de)serialisers ──────────────────────────
 def _dump_state(state: ChatState) -> str:
@@ -106,3 +113,48 @@ async def chat_query(request: QueryRequest):
     except Exception as exc:                     # noqa: BLE001
         logger.exception("LangGraph error:")
         raise HTTPException(status_code=500, detail=f"Chat processing failed: {exc}") from exc
+
+@app.post("/chat")
+async def chat(request: ChatRequest):
+    try:
+        logger.info("Received ChatRequest: awaiting_email=%s, awaiting_otp=%s, email=%s, user_input=%r",
+                    request.awaiting_email, request.awaiting_otp, request.email, request.user_input)
+
+        # Convert messages to LangChain format
+        langchain_messages = []
+        for msg_dict in request.messages:
+            if msg_dict["role"] == "user":
+                langchain_messages.append(HumanMessage(content=msg_dict["content"]))
+            elif msg_dict["role"] == "assistant":
+                langchain_messages.append(AIMessage(content=msg_dict["content"]))
+
+        state = ChatState(
+            messages=langchain_messages,
+            user_input=request.user_input,
+            awaiting_email=request.awaiting_email,
+            awaiting_otp=request.awaiting_otp,
+            email=request.email,
+            last_monument_query=request.last_monument_query
+        )
+        
+        # Process the chat
+        result_dict = compiled_chat_graph.invoke(state.model_dump())
+        result_state = ChatState.model_validate(result_dict)
+        
+        # Prepare response
+        response = {
+            "response": result_state.response,
+            "awaiting_email": result_state.awaiting_email,
+            "awaiting_otp": result_state.awaiting_otp,
+            "email": result_state.email,
+            "last_monument_query": result_state.last_monument_query
+        }
+        
+        return response
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}

@@ -3,7 +3,7 @@ node_modules/
 .next/
 
 # Ignore Python virtual environment
-.venv/
+venv/
 
 # Ignore environment variable files
 .env
