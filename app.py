@@ -262,6 +262,7 @@ def main():
         # st.info(f"Sending to backend: user_input='{st.session_state.user_input_from_frontend}', awaiting_email={st.session_state.awaiting_email}, awaiting_otp={st.session_state.awaiting_otp}, last_monument_query={st.session_state.last_monument_query}") # Frontend logging
 
         try:
+            backend_response = {} # Initialize backend_response to an empty dictionary
             response = httpx.post(
                 f"{BACKEND_URL}/chat",
                 json={
