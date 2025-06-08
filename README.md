@@ -1,6 +1,12 @@
+<<<<<<< HEAD
 # Historical Monument Agent
 
 This is a conversational AI chatbot, the **Historical Monument Agent**, designed to provide information about historical monuments. The agent leverages a FastAPI backend for its core logic and uses Streamlit for a rich, interactive user interface.
+=======
+# 🏛️ **Historical Monument Explorer Agent** (Using Langgraph)
+
+## Overview 
+>>>>>>> 9eb7f87ed71d84340a000e18cb138b21993af2dd
 
 ## Features:
 - **Conversational AI:** Ask questions about various historical monuments.
@@ -109,3 +115,24 @@ python-dotenv
 ```
 
 *(Note: Always generate your `requirements.txt` files using `pip freeze > requirements.txt` after installing all dependencies to ensure accurate versions.)*
+-   Integrate a wider range of monuments and data sources.
+-   Implement more advanced natural language processing for complex queries.
+-   Add support for different LLM providers.
+-   Enhance the email content formatting.
+-   Improve error handling and feedback mechanisms.
+
+## 📄 License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details (Note: You may need to create a LICENSE file with the MIT license text if you don't have one).
+
+## 🤝 Contributing
+
+Contributions are welcome! If you'd like to contribute, please fork the repository and submit a pull request. For major changes, please open an issue first to discuss what you would like to change.
+
+## 👥 Authors
+
+-   [ Vaishnavi Bhavsar ] Link to your GitHub profile: https://github.com/vaishnavibhavsar1510
+
+## 📞 Support or Contact
+
+If you have any questions or need support, please open an issue on the GitHub repository or contact [vaishnavibhavsar03@email.com].
