@@ -1,64 +1,77 @@
 # backend/app/monument_search.py
+"""
+Light-weight Retrieval-QA wrapper over a local JSON list of monuments.
 
-import json
-import os
-from typing import List, Dict
+• Loads monument data once  (st.cache_data)
+• Builds an in-memory FAISS index once (st.cache_resource)
+• Exposes answer_monument_query() for the Streamlit app
+"""
 
-from langchain_community.embeddings import OpenAIEmbeddings
+from __future__ import annotations
+import json, os
+from pathlib import Path
+import streamlit as st
+
+from langchain.chains import RetrievalQA
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_community.vectorstores import FAISS
 
-from backend.app.config import settings
+# ── Locate data/monuments.json ──────────────────────────────────────────────
+ROOT_DIR  = Path(__file__).resolve().parents[2]
+DATA_PATH = ROOT_DIR / "data" / "monuments.json"
 
-# Path to your local JSON file containing monument data
-DATA_PATH = os.path.join(os.path.dirname(__file__), "../../data/monuments.json")
+# ── Helper: fetch key from env or st.secrets ────────────────────────────────
+def _openai_key() -> str:
+    # prefer env-var so REPL/tests work; fall back to st.secrets
+    return (
+        os.getenv("OPENAI_API_KEY")
+        or st.secrets.get("OPENAI_API_KEY", "")
+    )
 
+# ── Cache monument JSON ─────────────────────────────────────────────────────
+@st.cache_data(show_spinner="📚 Loading monument data…")
+def _load_monuments() -> list[dict]:
+    with open(DATA_PATH, encoding="utf-8") as f:
+        return json.load(f)
 
-class MonumentSearch:
-    def __init__(self):
-        # Initialize OpenAIEmbeddings with your API key
-        self.embeddings = OpenAIEmbeddings(openai_api_key=settings.openai_api_key)
+# ── Cache FAISS index + RetrievalQA chain ───────────────────────────────────
+@st.cache_resource(show_spinner="🔧 Building FAISS index…")
+def _build_qa_chain() -> RetrievalQA:
+    monuments  = _load_monuments()
+    texts      = [m["description"] for m in monuments]
+    metadatas  = [{"name": m["name"], "location": m["location"]} for m in monuments]
+    key        = _openai_key()
 
-        # Load the monuments JSON into a Python list of dicts
-        self.monuments = self._load_monuments()
+    vs = FAISS.from_texts(
+        texts,
+        embedding=OpenAIEmbeddings(openai_api_key=key),
+        metadatas=metadatas,
+    )
+    retriever = vs.as_retriever()
 
-        # Build a FAISS vectorstore from the descriptions
-        self.vectorstore = self._build_vectorstore()
+    return RetrievalQA.from_chain_type(
+        llm=ChatOpenAI(model="gpt-3.5-turbo", temperature=0.7, api_key=key),
+        retriever=retriever,
+    )
 
-    def _load_monuments(self) -> List[Dict]:
-        """
-        Load the JSON file at DATA_PATH and return a list of monuments,
-        each being a dict with at least 'name', 'location', and 'description' keys.
-        """
-        with open(DATA_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+# ── Public helper for Streamlit UI ──────────────────────────────────────────
+def answer_monument_query(query: str) -> str:
+    """
+    Return a concise answer for *query* using the monument knowledge base.
+    Works with both old (str) and new (dict) LangChain outputs.
+    """
+    qa_chain = _build_qa_chain()
 
-    def _build_vectorstore(self):
-        """
-        Create a FAISS index from the monuments' descriptions. Each text entry
-        is the 'description' field, and metadata includes name & location.
-        """
-        texts = [m["description"] for m in self.monuments]
-        metadatas = [{"name": m["name"], "location": m["location"]} for m in self.monuments]
+    # Handle both invoke signatures automatically
+    try:
+        result = qa_chain.invoke({"query": query})
+    except TypeError:
+        result = qa_chain.invoke(query)
 
-        # Build and return a FAISS vectorstore
-        return FAISS.from_texts(texts, self.embeddings, metadatas=metadatas)
+    if isinstance(result, dict):               # LC ≥0.2
+        for k in ("result", "output_text", "answer"):
+            if isinstance(result.get(k), str):
+                return result[k]
+        return str(result)                     # fallback
 
-    def search(self, query: str, k: int = 2) -> List[Dict]:
-        """
-        Perform a similarity search on the FAISS index using the query.
-        Returns up to 'k' results as a list of dicts, each containing:
-        { "name": ..., "location": ..., "description": ... }.
-        """
-        results = self.vectorstore.similarity_search(query, k=k)
-        return [
-            {
-                "name": r.metadata["name"],
-                "location": r.metadata["location"],
-                "description": r.page_content
-            }
-            for r in results
-        ]
-
-
-# Instantiate a singleton for use elsewhere in the app
-monument_search = MonumentSearch()
+    return str(result)                         # LC ≤0.1 returns str

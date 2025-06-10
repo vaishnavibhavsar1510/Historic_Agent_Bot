@@ -1,12 +1,7 @@
-<<<<<<< HEAD
-# Historical Monument Agent
+# 🏛️ Historical Monument Explorer Agent
 
+## Overview
 This is a conversational AI chatbot, the **Historical Monument Agent**, designed to provide information about historical monuments. The agent leverages a FastAPI backend for its core logic and uses Streamlit for a rich, interactive user interface.
-=======
-# 🏛️ **Historical Monument Explorer Agent** (Using Langgraph)
-
-## Overview 
->>>>>>> 9eb7f87ed71d84340a000e18cb138b21993af2dd
 
 ## Features:
 - **Conversational AI:** Ask questions about various historical monuments.

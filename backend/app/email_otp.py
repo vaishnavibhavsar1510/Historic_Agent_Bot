@@ -1,57 +1,72 @@
 # backend/app/email_otp.py
+"""
+Utility helpers to generate/send OTPs and verify them.
+
+You can invoke this file directly (`python email_otp.py`) to test the
+end-to-end OTP e-mail flow from the command line.
+"""
+
+from __future__ import annotations
 
 import logging
-from backend.app.otp import generate_otp, store_otp, verify_otp
-from backend.app.email_utils import send_otp_email
+
+from otp import generate_otp, store_otp, verify_otp           # local modules
+from email_utils import send_otp_email
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
+# --------------------------------------------------------------------------- #
+# Public helpers
+# --------------------------------------------------------------------------- #
+
 def generate_and_send_otp(email: str) -> tuple[bool, str]:
     """
-    Generate a 6‐digit OTP, store it in Redis, and send it via SendGrid.
-    Returns (True, "Success message") or (False, "Error message").
+    1. Generate a 6-digit OTP
+    2. Store it in Redis (5-min TTL by default)
+    3. Send it via SendGrid
+
+    Returns ``(True, "Success message")`` or ``(False, "Error message")``.
     """
     otp = generate_otp()
     store_otp(email, otp)
 
-    # send_otp_email returns True/False
     sent = send_otp_email(email, otp)
     if sent:
         return True, "OTP sent successfully!"
-    else:
-        return False, "Failed to send OTP."
+    return False, "Failed to send OTP."
 
 
 def verify_user_otp(email: str, user_input_otp: str) -> bool:
     """
-    Verify the user‐provided OTP against the one stored in Redis.
-    If valid, returns True (and deletes the stored OTP). Otherwise, returns False.
+    Check the user-supplied *user_input_otp* against the stored value
+    in Redis.  Returns ``True`` on match (and deletes the stored OTP),
+    ``False`` otherwise.
     """
     return verify_otp(email, user_input_otp)
 
 
-# Example CLI‐style testing (run with `python email_otp.py`)
+# --------------------------------------------------------------------------- #
+# Simple CLI tester
+# --------------------------------------------------------------------------- #
+
 if __name__ == "__main__":
     print("OTP Email Testing System")
-    print("-" * 30)
+    print("-" * 32)
 
-    # Prompt for receiver email
-    receiver_email = input("Enter the recipient's email address: ").strip()
+    recipient = input("Recipient e-mail: ").strip()
 
-    # Generate and send OTP
-    success, msg = generate_and_send_otp(receiver_email)
+    ok, msg = generate_and_send_otp(recipient)
     print(msg)
-    if not success:
-        exit(1)
+    if not ok:
+        raise SystemExit(1)
 
-    # Prompt user to enter received OTP
     print("\nOTP Verification")
-    print("-" * 30)
-    user_input_code = input("Enter the OTP you received: ").strip()
+    print("-" * 32)
+    user_code = input("Enter the OTP you received: ").strip()
 
-    if verify_user_otp(receiver_email, user_input_code):
+    if verify_user_otp(recipient, user_code):
         print("OTP verified successfully!")
     else:
-        print("Invalid or expired OTP!")
+        print("Invalid or expired OTP.")

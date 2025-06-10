@@ -1,33 +1,43 @@
-# backend/app/email_utils.py
 """
-SendGrid-based e-mail helpers.
+SendGrid-based e-mail helpers for the Streamlit-only build.
 
-We send only two kinds of messages:
-  • OTP codes  (send_otp_email)
-  • Plain “guide / notification” e-mails (send_plain_email)
+Exposed helpers
+---------------
+• send_via_sendgrid(to_email, subject, plain_text, html_content=None)
+• send_otp_email(receiver_email, otp)          – thin wrapper for OTP flow
+• send_plain_email(receiver_email, subject, body)
+
+All credentials come from st.secrets:
+    SENDGRID_API_KEY   –  your SendGrid API key
+    EMAIL_SENDER       –  a verified sender address in SendGrid
 """
+
+from __future__ import annotations
 
 import logging
-from typing import Final
+from typing import Final, Optional
 
+import streamlit as st
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
-
-from backend.app.config import settings
 
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
-#  Shared client & helpers
+#  Client & sender pulled from Streamlit secrets
 # --------------------------------------------------------------------------- #
 
-SENDGRID_CLIENT: Final = SendGridAPIClient(settings.sendgrid_api_key)
-SENDER_EMAIL:     Final = settings.email_sender          # verified sender
+SENDGRID_CLIENT: Final = SendGridAPIClient(st.secrets["SENDGRID_API_KEY"])
+SENDER_EMAIL:     Final = st.secrets.get("EMAIL_SENDER", "no-reply@example.com")
+
+# --------------------------------------------------------------------------- #
+#  Low-level wrapper
+# --------------------------------------------------------------------------- #
 
 def _send(mail: Mail) -> bool:
     """
-    Low-level wrapper that actually calls SendGrid and returns True/False
-    depending on whether the response status code is 2xx.
+    Actually call SendGrid; return True iff status code is 2xx.
+    Logs non-2xx or raised exceptions.
     """
     try:
         resp = SENDGRID_CLIENT.send(mail)
@@ -36,10 +46,10 @@ def _send(mail: Mail) -> bool:
             logger.warning(
                 "SendGrid returned %s (%s)",
                 resp.status_code,
-                resp.body.decode() if resp.body else "no body",
+                resp.body.decode() if resp.body else "no body"
             )
         return ok
-    except Exception as exc:                             # pragma: no cover
+    except Exception as exc:                           # pragma: no cover
         logger.error("SendGrid exception: %s", exc, exc_info=True)
         return False
 
@@ -47,44 +57,50 @@ def _send(mail: Mail) -> bool:
 #  Public helpers
 # --------------------------------------------------------------------------- #
 
-def send_otp_email(receiver_email: str, otp: str) -> bool:
+def send_via_sendgrid(
+    to_email: str,
+    subject: str,
+    plain_text: str,
+    html_content: Optional[str] = None
+) -> bool:
     """
-    Send an OTP email (unchanged template, still used by the workflow).
+    General-purpose one-shot sender.  *html_content* falls back to
+    a simple <br>-converted version of *plain_text*.
     """
-    body_text = (
-        "Hello,\n\n"
-        f"Your OTP code is: {otp}\n\n"
-        "This OTP is valid for 5 minutes.\n\n"
-        "If you didn’t request this OTP, please ignore this email.\n\n"
-        "Best regards,\nYour Application Team"
-    )
-
     mail = Mail(
         from_email=SENDER_EMAIL,
-        to_emails=receiver_email,
-        subject="Your OTP Code",
-        plain_text_content=body_text,
-        html_content=body_text.replace("\n", "<br>")
+        to_emails=to_email,
+        subject=subject,
+        plain_text_content=plain_text,
+        html_content=html_content or plain_text.replace("\n", "<br>")
     )
     return _send(mail)
+
+
+def send_otp_email(receiver_email: str, otp: str) -> bool:
+    """
+    Convenience wrapper for the OTP flow (kept for backward compatibility).
+    """
+    body = (
+        "Hello,\n\n"
+        f"Your OTP code is: {otp}\n\n"
+        "This code expires in 5 minutes.\n\n"
+        "If you didn’t request this, please ignore the e-mail.\n\n"
+        "Best regards,\nHistorical Monument Agent"
+    )
+    return send_via_sendgrid(
+        to_email=receiver_email,
+        subject="Your OTP Code",
+        plain_text=body
+    )
 
 
 def send_plain_email(receiver_email: str, subject: str, body: str) -> bool:
     """
-    Generic helper for any *non-OTP* message (e.g. detailed monument guide).
-
-    Example:
-        send_plain_email(
-            "alice@example.com",
-            "Extra details about Taj Mahal",
-            "Here’s more info … Enjoy your visit!"
-        )
+    Generic helper for non-OTP messages (e.g. detailed monument guide).
     """
-    mail = Mail(
-        from_email=SENDER_EMAIL,
-        to_emails=receiver_email,
+    return send_via_sendgrid(
+        to_email=receiver_email,
         subject=subject,
-        plain_text_content=body,
-        html_content=body.replace("\n", "<br>")
+        plain_text=body
     )
-    return _send(mail)
